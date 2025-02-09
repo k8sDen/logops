@@ -203,8 +203,11 @@ services:
     container_name: vector
     volumes:
       - ./vector/vector.yaml:/etc/vector/vector.yaml
+      - certs:/etc/vector/certs
     networks:
       - logops-net
     depends_on:
       kafka-1:
+        condition: service_healthy
+      es-master:
         condition: service_healthy

@@ -6,10 +6,54 @@ sources:
     topics:
       - "nginx-logs-topic"
     auto_offset_reset: "beginning"
-sinks:
-  out:
+
+transforms:
+  parse_nginx:
+    type: "remap"
     inputs:
       - "kafka_logs"
+    source: |
+      parsed, err = parse_grok(.message, "%{IP:ip} - - \\[%{HTTPDATE:date}\\] \"%{WORD:http_method} %{URIPATHPARAM:uri} %{DATA:protocol}\" %{NUMBER:code} %{NUMBER:bytes} \"%{DATA:referrer}\" \"%{DATA:agent}\"")
+
+      if err == null {
+        .ip = parsed.ip
+        .date = parsed.date
+        .http_query = "#{parsed.http_method} #{parsed.uri} #{parsed.protocol}"
+        .uri = parsed.uri
+        .protocol = parsed.protocol
+        .code = to_int!(parsed.code)
+        .bytes = to_int!(parsed.bytes)
+        .referrer = parsed.referrer
+        .agent = parsed.agent
+      } else {
+        log("Grok parsing failed: " + err, level: "error")
+      }
+
+sinks:
+  console:
+    inputs:
+      - "parse_nginx"
     type: "console"
     encoding:
       codec: "text"
+  
+  elasticsearch:
+    inputs:
+      - "parse_nginx"
+    type: "elasticsearch"
+    endpoints: 
+      - "https://es-master:9200"
+    bulk:
+      index: "nginx-logs-%Y.%m.%d"
+    tls:
+      ca_file: "/etc/vector/certs/ca/ca.crt"
+      verify_certificate: true
+      verify_hostname: true
+    auth:
+      strategy: basic
+      user: "nginx-user"
+      password: "nginx-password"
+    batch:
+      max_bytes: 10485760  # Максимальный размер батча (10 MB)
+      timeout_secs: 5
+    
