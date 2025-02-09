@@ -1,0 +1,211 @@
+volumes:
+  certs:
+    driver: local
+  esdata-master:
+    driver: local
+  esdata-hot:
+    driver: local
+  esdata-content:
+    driver: local
+  esdata-ingest:
+    driver: local
+  kibanadata:
+    driver: local
+
+networks:
+  logops-net:
+    driver: bridge
+
+services:
+  setup-es:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.6.1
+    container_name: setup-es
+    volumes:
+      - ./elasticsearch/setup-elasticsearch.sh:/usr/share/elasticsearch/setup-elasticsearch.sh
+      - certs:/usr/share/elasticsearch/config/certs
+    user: "0"  # Запуск под рутом для изменения прав файлов
+    command: ["bash", "-c", "/usr/share/elasticsearch/setup-elasticsearch.sh"]
+    environment:
+      - ELASTIC_PASSWORD=test123
+    healthcheck:
+      test: ["CMD-SHELL", "[ -f /usr/share/elasticsearch/config/certs/es-master/es-master.crt ]"]
+      interval: 1s
+      timeout: 5s
+      retries: 120
+    networks:
+      - logops-net
+  es-master:
+    depends_on:
+      setup-es:
+        condition: service_healthy
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.6.1
+    container_name: es-master
+    volumes:
+      - certs:/usr/share/elasticsearch/config/certs
+      - esdata-master:/usr/share/elasticsearch/data
+    ports:
+      - 9200:9200
+    environment:
+      - node.name=es-master
+      - discovery.type=single-node
+      - ELASTIC_PASSWORD=test123
+      - bootstrap.memory_lock=true
+      - xpack.security.enabled=true
+      - xpack.security.http.ssl.enabled=true
+      - xpack.security.http.ssl.key=certs/es-master/es-master.key
+      - xpack.security.http.ssl.certificate=certs/es-master/es-master.crt
+      - xpack.security.http.ssl.certificate_authorities=certs/ca/ca.crt
+      - xpack.security.transport.ssl.enabled=true
+      - xpack.security.transport.ssl.key=certs/es-master/es-master.key
+      - xpack.security.transport.ssl.certificate=certs/es-master/es-master.crt
+      - xpack.security.transport.ssl.certificate_authorities=certs/ca/ca.crt
+      - xpack.security.transport.ssl.verification_mode=certificate
+      - xpack.license.self_generated.type=basic
+      - cluster.routing.allocation.disk.watermark.low=2gb
+      - cluster.routing.allocation.disk.watermark.high=1gb
+      - cluster.routing.allocation.disk.watermark.flood_stage=512mb
+    mem_limit: 1073741824
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "curl -s --cacert config/certs/ca/ca.crt https://localhost:9200 | grep -q 'missing authentication credentials'",
+        ]
+      interval: 10s
+      timeout: 10s
+      retries: 120
+    
+    networks:
+      - logops-net
+  kibana:
+    depends_on:
+      es-master:
+        condition: service_healthy
+    image: docker.elastic.co/kibana/kibana:8.6.1
+    container_name: kibana
+    volumes:
+      - certs:/usr/share/kibana/config/certs
+      - kibanadata:/usr/share/kibana/data
+    ports:
+      - 5601:5601
+    environment:
+      - SERVERNAME=kibana
+      - ELASTICSEARCH_HOSTS=https://es-master:9200
+      - ELASTICSEARCH_USERNAME=kibana_system
+      - ELASTICSEARCH_PASSWORD=kibana123
+      - ELASTICSEARCH_SSL_CERTIFICATEAUTHORITIES=config/certs/ca/ca.crt
+    mem_limit: 1073741824
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "curl -s -I http://localhost:5601 | grep -q 'HTTP/1.1 302 Found'",
+        ]
+      interval: 10s
+      timeout: 10s
+      retries: 120
+    networks:
+      - logops-net
+  zookeeper-1:
+    image: confluentinc/cp-zookeeper:latest
+    container_name: zookeeper-1
+    ports:
+      - "2181:2181"
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+      ZOOKEEPER_SERVER_ID: 1
+    networks:
+      - logops-net
+  kafka-1:
+    image: confluentinc/cp-kafka:latest
+    container_name: kafka-1
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: "zookeeper-1:2181"
+      ZOOKEEPER_SASL_ENABLED: 'false'
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092, SASL_PLAINTEXT://0.0.0.0:29092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-1:9092, SASL_PLAINTEXT://kafka-1:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT, SASL_PLAINTEXT:SASL_PLAINTEXT
+      KAFKA_SECURITY_INTER_BROKER_PROTOCOL: SASL_PLAINTEXT
+      KAFKA_SASL_MECHANISM_INTER_BROKER_PROTOCOL: PLAIN
+      KAFKA_SASL_ENABLED_MECHANISMS: PLAIN
+      KAFKA_AUTHORIZER_CLASS_NAME: kafka.security.authorizer.AclAuthorizer
+      KAFKA_ALLOW_EVERYONE_IF_NO_ACL_FOUND: "true"
+      KAFKA_OPTS: -Djava.security.auth.login.config=/etc/kafka/configs/kafka_server_jaas.conf
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_SUPER_USERS: User:ANONYMOUS;User:admin
+    volumes:
+      - ./kafka/configs:/etc/kafka/configs
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-topics --list --bootstrap-server localhost:9092 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    depends_on:
+      - zookeeper-1
+    ports:
+      - "9092:9092"
+      - "29092:29092"
+    networks:
+      - logops-net
+  setup-kafka:
+    image: confluentinc/cp-kafka:latest
+    container_name: setup-kafka
+    depends_on:
+      kafka-1:
+        condition: service_healthy
+    networks:
+      - logops-net
+    command: >
+      sh -c "
+      echo 'Waiting for Kafka to be ready...' &&
+      while ! nc -z kafka-1 9092; do sleep 2; done &&
+      echo 'Kafka is up, creating topics and setting ACLs...' &&
+      kafka-topics --create --topic nginx-logs-topic --partitions 1 --replication-factor 1 --if-not-exists --bootstrap-server kafka-1:9092 &&
+      kafka-acls --add --allow-principal User:nginx-user --operation All --topic nginx-logs-topic --bootstrap-server kafka-1:9092 &&
+      echo 'Setup complete.'"
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: kafka-ui
+    depends_on:
+      kafka-1:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka-1:9092
+      KAFKA_CLUSTERS_0_ZOOKEEPER: zookeeper-1:2181
+    networks:
+      - logops-net
+  nginx:
+    build:
+      context: ./nginx
+      dockerfile: Dockerfile
+    container_name: nginx
+    ports:
+      - "80:80"
+    depends_on:
+      kafka-1:
+        condition: service_healthy
+      es-master:
+        condition: service_healthy
+    networks:
+      - logops-net
+  vector:
+    image: timberio/vector:0.44.0-debian
+    container_name: vector
+    volumes:
+      - ./vector/vector.yaml:/etc/vector/vector.yaml
+      - certs:/etc/vector/certs:ro
+    networks:
+      - logops-net
+    depends_on:
+      kafka-1:
+        condition: service_healthy

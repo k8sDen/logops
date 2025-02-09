@@ -1,0 +1,15 @@
+sources:
+  kafka_logs:
+    type: kafka
+    bootstrap_servers: "kafka-1:9092"
+    group_id: "vector-consumer-group"
+    topics:
+      - "nginx-logs-topic"
+    auto_offset_reset: "beginning"
+sinks:
+  out:
+    inputs:
+      - "kafka_logs"
+    type: "console"
+    encoding:
+      codec: "text"

@@ -1,0 +1,49 @@
+global:
+  logs:
+    level: "debug"
+data_dir: /var/lib/vector
+
+# Источник данных: Kafka
+sources:
+  kafka_logs:
+    type: kafka
+    bootstrap_servers: "kafka-1:9092"
+    group_id: vector-consumer-group
+    topics: ['nginx-logs-topic']
+    auto_offset_reset: "beginning"
+
+# Трансформация: парсинг логов с помощью grok patterns
+transforms:
+  parse_nginx_logs:
+    type: remap
+    inputs: ["kafka_logs"]
+    source: |
+      . = parse_grok!(.message, "%{IP:ip} - - \\[%{HTTPDATE:date}\\] \"%{WORD:method} %{URIPATHPARAM:uri} HTTP/%{NUMBER:protocol}\" %{NUMBER:code} .*")
+      .timestamp = to_timestamp!(.date, format: "%d/%b/%Y:%H:%M:%S %z")
+      .level = "info"
+
+# Синхронизация: отправка данных в Elasticsearch
+sinks:
+  elasticsearch:
+    type: elasticsearch
+    inputs:
+      - parse_nginx_logs  # Указываем правильный источник данных
+    endpoint: "https://es-master:9200"
+
+    data_stream:
+      dataset: "nginx-logs"
+      namespace: "default"
+
+    compression: gzip
+    tls:
+      ca_file: "/etc/vector/certs/ca/ca.crt"
+      verify_certificate: true
+      verify_hostname: true
+
+    auth:
+      strategy: basic
+      user: "nginx-user"
+      password: "nginxpassword"
+
+    request:
+      timeout_secs: 10
