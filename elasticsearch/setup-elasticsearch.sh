@@ -78,7 +78,7 @@ done
 echo "Создаём пользователя nginx-user с правами superuser..."
 curl -X POST "https://es-master:9200/_security/user/nginx-user" -H "Content-Type: application/json" -u "elastic:${ELASTIC_PASSWORD}" --cacert /usr/share/elasticsearch/config/certs/ca/ca.crt -d '
 {
-  "password": "nginxpassword",
+  "password": "nginx-password",
   "roles": ["superuser"],
   "full_name": "Nginx User",
   "email": "nginxuser@example.com"
