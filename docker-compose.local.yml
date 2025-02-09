@@ -203,7 +203,6 @@ services:
     container_name: vector
     volumes:
       - ./vector/vector.yaml:/etc/vector/vector.yaml
-      - certs:/etc/vector/certs:ro
     networks:
       - logops-net
     depends_on:
