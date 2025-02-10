@@ -135,15 +135,15 @@ curl -X PUT "https://es-master:9200/_index_template/hot-3" -H "Content-Type: app
     },
     "mappings": {
       "properties": {
-        "timestamp": {
-          "type": "date"
+        "ip": { "type": "ip" },
+        "date": {
+          "type": "date",
+          "format": "dd/MMM/yyyy:HH:mm:ss Z||strict_date_optional_time"
         },
-        "message": {
-          "type": "text"
-        },
-        "status": {
-          "type": "keyword"
-        }
+        "http_query": { "type": "text" },
+        "uri": { "type": "keyword" },
+        "protocol": { "type": "keyword" },
+        "code": { "type": "integer" }
       }
     }
   }
@@ -162,15 +162,15 @@ curl -X PUT "https://es-master:9200/_index_template/hot-7" -H "Content-Type: app
     },
     "mappings": {
       "properties": {
-        "timestamp": {
-          "type": "date"
+        "ip": { "type": "ip" },
+        "date": {
+          "type": "date",
+          "format": "dd/MMM/yyyy:HH:mm:ss Z||strict_date_optional_time"
         },
-        "message": {
-          "type": "text"
-        },
-        "status": {
-          "type": "keyword"
-        }
+        "http_query": { "type": "text" },
+        "uri": { "type": "keyword" },
+        "protocol": { "type": "keyword" },
+        "code": { "type": "integer" }
       }
     }
   }
