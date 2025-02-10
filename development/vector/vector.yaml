@@ -18,7 +18,7 @@ transforms:
       if err == null {
         .ip = parsed.ip
         .date = parsed.date
-        .http_query = "#{parsed.http_method} #{parsed.uri} #{parsed.protocol}"
+        .http_query = to_string!(parsed.http_method) + " " + to_string!(parsed.uri) + " " + to_string!(parsed.protocol)
         .uri = parsed.uri
         .protocol = parsed.protocol
         .code = to_int!(parsed.code)
